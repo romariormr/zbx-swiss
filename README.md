@@ -209,7 +209,7 @@ Para alterar: menu → opção 15, ou `sudo ./zbx-swiss.sh --reconfigure`.
 
 Se este script te economizou tempo, considere um cafezinho! ☕
 
-[![Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/SEU_USUARIO)
+[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/P5P21XLC5G)
 
 ---
 
