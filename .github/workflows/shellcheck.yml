@@ -1,0 +1,40 @@
+name: ShellCheck
+
+on:
+  push:
+    branches: [ main ]
+    paths:
+      - '**.sh'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - '**.sh'
+
+jobs:
+  shellcheck:
+    name: ShellCheck Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Syntax check (bash -n)
+        run: bash -n zbx-swiss.sh && echo "Syntax OK"
+
+      - name: ShellCheck
+        run: |
+          shellcheck \
+            --severity=error \
+            --shell=bash \
+            --exclude=SC1091,SC2034 \
+            zbx-swiss.sh
+        # SC1091: não segue 'source' de arquivos externos
+        # SC2034: variáveis de cor usadas via echo -e são detectadas como unused
+
+      - name: Summary
+        if: success()
+        run: echo "✓ zbx-swiss.sh passou em todas as verificações de qualidade"

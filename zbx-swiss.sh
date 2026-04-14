@@ -12,25 +12,24 @@
 #   Oracle Linux 8 / 9  |  Rocky Linux 8 / 9
 #   AlmaLinux 8 / 9     |  CentOS Stream 8 / 9
 #
-# Repositório: https://github.com/SEU_USUARIO/zbx-swiss
+# Repositório: https://github.com/romariormr/zbx-swiss
 # ================================================================================
 set -euo pipefail
 
 # ================================================================================
 # VERSÃO
 # ================================================================================
-VERSION="6.0"
+VERSION="7.0"
 SCRIPT_NAME="ZBX Swiss Manager"
 SCRIPT_FILE="$(realpath "$0")"
+GITHUB_RAW_URL="https://raw.githubusercontent.com/romariormr/zbx-swiss/main/zbx-swiss.sh"
 
 # ================================================================================
 # CONFIGURAÇÃO PERSISTENTE
-# Salva e carrega entre execuções — nunca perde suas preferências
 # ================================================================================
 CONFIG_DIR="/etc/zbx-swiss"
 CONFIG_FILE="$CONFIG_DIR/config.conf"
 
-# Defaults — usados quando não há config salva
 DEFAULT_ZABBIX_VERSION="7.2"
 DEFAULT_SERVER_IP=""
 DEFAULT_TIMEZONE="America/Sao_Paulo"
@@ -48,7 +47,6 @@ DEFAULT_DATA_SENDER_FREQUENCY=5
 DEFAULT_PROXY_TIMEOUT=30
 DEFAULT_LOG_FILE="/var/log/zbx-swiss.log"
 
-# Inicializar com defaults
 ZABBIX_VERSION="$DEFAULT_ZABBIX_VERSION"
 SERVER_IP="$DEFAULT_SERVER_IP"
 TIMEZONE="$DEFAULT_TIMEZONE"
@@ -69,7 +67,6 @@ LOG_FILE="$DEFAULT_LOG_FILE"
 AUTO_YES="${AUTO_YES:-false}"
 DRY_RUN="${DRY_RUN:-false}"
 
-# Variáveis detectadas em runtime
 OS_TYPE="" OS_VERSION="" OS_CODENAME="" PKG_MANAGER=""
 
 # ================================================================================
@@ -80,7 +77,7 @@ vermelho="\e[91m"; azul="\e[34m"; roxo="\e[35m"; ciano="\e[36m"
 cinza="\e[90m"; reset="\e[0m"; bold="\e[1m"
 
 # ================================================================================
-# LOGGING — terminal + arquivo
+# LOGGING
 # ================================================================================
 setup_logging() {
   [[ $EUID -ne 0 ]] && return
@@ -95,14 +92,11 @@ log_warning() { echo -e "${amarelo}⚠${reset}  $*"; }
 log_error()   { echo -e "${vermelho}✗${reset}  $*" >&2; }
 
 # ================================================================================
-# TRATAMENTO DE ERROS
+# ERROS / CONFIRM / DRY-RUN
 # ================================================================================
 error_exit() { log_error "$1"; exit 1; }
 trap '_on_err=$?; log_error "Erro na linha $LINENO (código $_on_err)"; exit $_on_err' ERR
 
-# ================================================================================
-# CONFIRMAÇÃO E DRY-RUN
-# ================================================================================
 confirm() {
   local prompt="${1:-Confirmar?}"
   [[ $AUTO_YES == true ]] && { log_info "$prompt → [S] (auto)"; return 0; }
@@ -116,10 +110,8 @@ run_cmd() {
 }
 
 # ================================================================================
-# SISTEMA DE CONFIGURAÇÃO PERSISTENTE
+# CONFIGURAÇÃO PERSISTENTE
 # ================================================================================
-
-# Variáveis salvas no arquivo de config
 _CONFIG_VARS=(
   ZABBIX_VERSION SERVER_IP TIMEZONE
   INSTALL_AGENT AGENT_VERSION
@@ -142,8 +134,7 @@ load_config() {
         WEBHOOK_URL|SEND_WEBHOOK|CACHE_SIZE|START_POLLERS|\
         START_POLLERS_UNREACHABLE|LOG_SLOW_QUERIES|\
         DATA_SENDER_FREQUENCY|PROXY_TIMEOUT)
-          printf -v "$key" '%s' "$value"
-          ;;
+          printf -v "$key" '%s' "$value" ;;
       esac
     fi
   done < "$CONFIG_FILE"
@@ -162,7 +153,6 @@ save_config() {
   log_success "Configuração salva em $CONFIG_FILE"
 }
 
-# Wizard de primeira execução
 first_run_wizard() {
   clear
   echo -e "${azul}${bold}"
@@ -184,9 +174,7 @@ BANNER
   echo ""
   echo -e "${ciano}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}"
   echo ""
-
-  echo -e "${amarelo}${bold}⚙️  Configuração do Zabbix Proxy${reset}"
-  echo ""
+  echo -e "${amarelo}${bold}⚙️  Configuração do Zabbix Proxy${reset}"; echo ""
 
   local _v
   read -rp "$(echo -e "  ${branco}Versão do Zabbix${reset} [${ZABBIX_VERSION}]: ")"    _v; ZABBIX_VERSION="${_v:-$ZABBIX_VERSION}"
@@ -196,31 +184,26 @@ BANNER
     read -rp "$(echo -e "  ${branco}IP do servidor Zabbix${reset}: ")" _v
   done
   [[ -n "$_v" ]] && SERVER_IP="$_v"
+  read -rp "$(echo -e "  ${branco}Timezone${reset} [${TIMEZONE}]: ")" _v; TIMEZONE="${_v:-$TIMEZONE}"
 
-  read -rp "$(echo -e "  ${branco}Timezone${reset} [${TIMEZONE}]: ")"                  _v; TIMEZONE="${_v:-$TIMEZONE}"
-
-  echo ""
-  echo -e "${amarelo}${bold}⚙️  Agente Zabbix${reset}"
-  read -rp "$(echo -e "  ${branco}Instalar agente?${reset} (S/N) [S]: ")"              _v
+  echo ""; echo -e "${amarelo}${bold}⚙️  Agente Zabbix${reset}"
+  read -rp "$(echo -e "  ${branco}Instalar agente?${reset} (S/N) [S]: ")" _v
   [[ ${_v:-S} =~ ^[Nn]$ ]] && INSTALL_AGENT=false || INSTALL_AGENT=true
   if [[ $INSTALL_AGENT == true ]]; then
     read -rp "$(echo -e "  ${branco}Versão do agente${reset} (1/2) [${AGENT_VERSION}]: ")" _v
     AGENT_VERSION="${_v:-$AGENT_VERSION}"
   fi
 
-  echo ""
-  echo -e "${amarelo}${bold}⚙️  Notificação Webhook (opcional)${reset}"
+  echo ""; echo -e "${amarelo}${bold}⚙️  Notificação Webhook (opcional)${reset}"
   read -rp "$(echo -e "  ${branco}Enviar webhook após instalar?${reset} (S/N) [N]: ")" _v
   if [[ ${_v:-N} =~ ^[Ss]$ ]]; then
     SEND_WEBHOOK=true
-    read -rp "$(echo -e "  ${branco}URL do webhook${reset}: ")" _v
-    WEBHOOK_URL="${_v:-$WEBHOOK_URL}"
+    read -rp "$(echo -e "  ${branco}URL do webhook${reset}: ")" _v; WEBHOOK_URL="${_v:-$WEBHOOK_URL}"
   else
     SEND_WEBHOOK=false
   fi
 
-  echo ""
-  echo -e "${amarelo}${bold}⚙️  Parâmetros avançados do proxy${reset} ${cinza}(Enter para manter padrão)${reset}"
+  echo ""; echo -e "${amarelo}${bold}⚙️  Parâmetros avançados${reset} ${cinza}(Enter para manter padrão)${reset}"
   read -rp "$(echo -e "  ${branco}CacheSize${reset} [${CACHE_SIZE}]: ")"                 _v; CACHE_SIZE="${_v:-$CACHE_SIZE}"
   read -rp "$(echo -e "  ${branco}StartPollers${reset} [${START_POLLERS}]: ")"            _v; START_POLLERS="${_v:-$START_POLLERS}"
   read -rp "$(echo -e "  ${branco}DataSenderFrequency (s)${reset} [${DATA_SENDER_FREQUENCY}]: ")" _v; DATA_SENDER_FREQUENCY="${_v:-$DATA_SENDER_FREQUENCY}"
@@ -228,62 +211,41 @@ BANNER
 
   echo ""
   echo -e "${ciano}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}"
-  echo -e "${branco}  Resumo da configuração:${reset}"
-  echo -e "  Zabbix v${verde}${ZABBIX_VERSION}${reset}  |  Server: ${verde}${SERVER_IP}${reset}  |  Timezone: ${verde}${TIMEZONE}${reset}"
-  echo -e "  Agente: ${verde}$([ "$INSTALL_AGENT" = true ] && echo "Sim (v${AGENT_VERSION})" || echo "Não")${reset}  |  Webhook: ${verde}$([ "$SEND_WEBHOOK" = true ] && echo "Sim" || echo "Não")${reset}"
+  echo -e "${branco}  Resumo:${reset}  Zabbix ${verde}${ZABBIX_VERSION}${reset}  |  Server: ${verde}${SERVER_IP}${reset}  |  Timezone: ${verde}${TIMEZONE}${reset}"
   echo ""
-
-  confirm "Salvar configuração e continuar?" || {
-    log_info "Configuração descartada. Usando padrões."
-    return 0
-  }
-
-  save_config
-  echo ""
-  log_success "Configuração salva! Você pode alterá-la a qualquer momento no menu → opção 15"
-  sleep 2
+  confirm "Salvar configuração e continuar?" || { log_info "Usando padrões."; return 0; }
+  save_config; echo ""; log_success "Configuração salva! Altere quando quiser: menu → opção 19"; sleep 2
 }
 
-# Reconfiguração pelo menu (opção 15)
 reconfigure() {
   print_header
   echo -e "${amarelo}${bold}═══════════════════════════════════════════════════════════════════════════════"
   echo -e "                      ⚙️   RECONFIGURAR ZBX SWISS                             "
-  echo -e "═══════════════════════════════════════════════════════════════════════════════${reset}"
-  echo ""
-  echo -e "${cinza}  Config atual: $CONFIG_FILE${reset}"
-  echo ""
+  echo -e "═══════════════════════════════════════════════════════════════════════════════${reset}"; echo ""
+  echo -e "${cinza}  Config atual: $CONFIG_FILE${reset}"; echo ""
 
   local _v
   read -rp "$(echo -e "  ${branco}Versão do Zabbix${reset} [${ZABBIX_VERSION}]: ")"    _v; ZABBIX_VERSION="${_v:-$ZABBIX_VERSION}"
   read -rp "$(echo -e "  ${branco}IP do servidor Zabbix${reset} [${SERVER_IP}]: ")"    _v; SERVER_IP="${_v:-$SERVER_IP}"
   read -rp "$(echo -e "  ${branco}Timezone${reset} [${TIMEZONE}]: ")"                  _v; TIMEZONE="${_v:-$TIMEZONE}"
-
   echo ""
   read -rp "$(echo -e "  ${branco}Instalar agente?${reset} (S/N) [$([ "$INSTALL_AGENT" = true ] && echo S || echo N)]: ")" _v
-  [[ ${_v:-$([ "$INSTALL_AGENT" = true ] && echo S || echo N)} =~ ^[Nn]$ ]] \
-    && INSTALL_AGENT=false || INSTALL_AGENT=true
+  [[ ${_v:-$([ "$INSTALL_AGENT" = true ] && echo S || echo N)} =~ ^[Nn]$ ]] && INSTALL_AGENT=false || INSTALL_AGENT=true
   if [[ $INSTALL_AGENT == true ]]; then
-    read -rp "$(echo -e "  ${branco}Versão do agente${reset} (1/2) [${AGENT_VERSION}]: ")" _v
-    AGENT_VERSION="${_v:-$AGENT_VERSION}"
+    read -rp "$(echo -e "  ${branco}Versão do agente${reset} (1/2) [${AGENT_VERSION}]: ")" _v; AGENT_VERSION="${_v:-$AGENT_VERSION}"
   fi
-
   echo ""
   read -rp "$(echo -e "  ${branco}Enviar webhook?${reset} (S/N) [$([ "$SEND_WEBHOOK" = true ] && echo S || echo N)]: ")" _v
   if [[ ${_v:-N} =~ ^[Ss]$ ]]; then
-    SEND_WEBHOOK=true
-    read -rp "$(echo -e "  ${branco}URL do webhook${reset} [${WEBHOOK_URL}]: ")" _v
-    WEBHOOK_URL="${_v:-$WEBHOOK_URL}"
+    SEND_WEBHOOK=true; read -rp "$(echo -e "  ${branco}URL do webhook${reset} [${WEBHOOK_URL}]: ")" _v; WEBHOOK_URL="${_v:-$WEBHOOK_URL}"
   else
     SEND_WEBHOOK=false
   fi
-
   echo ""
   read -rp "$(echo -e "  ${branco}CacheSize${reset} [${CACHE_SIZE}]: ")"                 _v; CACHE_SIZE="${_v:-$CACHE_SIZE}"
   read -rp "$(echo -e "  ${branco}StartPollers${reset} [${START_POLLERS}]: ")"            _v; START_POLLERS="${_v:-$START_POLLERS}"
   read -rp "$(echo -e "  ${branco}DataSenderFrequency${reset} [${DATA_SENDER_FREQUENCY}]: ")" _v; DATA_SENDER_FREQUENCY="${_v:-$DATA_SENDER_FREQUENCY}"
   read -rp "$(echo -e "  ${branco}Timeout${reset} [${PROXY_TIMEOUT}]: ")"                 _v; PROXY_TIMEOUT="${_v:-$PROXY_TIMEOUT}"
-
   echo ""
   confirm "Salvar alterações?" && save_config || log_info "Alterações descartadas"
 }
@@ -297,14 +259,19 @@ $(echo -e "${branco}${bold}${SCRIPT_NAME} v${VERSION}${reset}")
 
 $(echo -e "${bold}Uso:${reset}") $0 [opções]
 
-$(echo -e "${amarelo}${bold}Ações diretas (sem entrar no menu):${reset}")
+$(echo -e "${amarelo}${bold}Ações diretas:${reset}")
   --install           Instalar Zabbix Proxy
   --remove            Remover Zabbix Proxy
   --status            Exibir status e sair
+  --health-check      Diagnóstico completo
   --expand-disk       Expandir disco LVM
   --backup            Executar backup agora
+  --restore           Restaurar backup
+  --tls-psk           Configurar TLS/PSK
   --restart           Reiniciar serviços
+  --diagnose          Exportar relatório de diagnóstico
   --reconfigure       Reconfigurar e salvar
+  --self-update       Atualizar o ZBX Swiss
 
 $(echo -e "${amarelo}${bold}Parâmetros:${reset}")
   -v, --version X.Y           Versão do Zabbix         (padrão: $DEFAULT_ZABBIX_VERSION)
@@ -325,9 +292,9 @@ $(echo -e "${amarelo}${bold}Parâmetros:${reset}")
 $(echo -e "${amarelo}${bold}Exemplos:${reset}")
   $0                              # menu interativo
   $0 --install --yes              # instalação silenciosa
-  $0 --status                     # ver status e sair
+  $0 --health-check               # diagnóstico completo
   $0 --expand-disk                # expandir disco sem reboot
-  $0 --dry-run --install          # simular instalação
+  $0 --self-update                # atualizar o script
 HELP
   exit 0
 }
@@ -338,30 +305,35 @@ HELP
 DIRECT_ACTION=""
 while [[ $# -gt 0 ]]; do
   case "$1" in
-    --install)            DIRECT_ACTION="install";     shift ;;
-    --remove)             DIRECT_ACTION="remove";      shift ;;
-    --status)             DIRECT_ACTION="status";      shift ;;
-    --expand-disk)        DIRECT_ACTION="expand";      shift ;;
-    --backup)             DIRECT_ACTION="backup";      shift ;;
-    --restart)            DIRECT_ACTION="restart";     shift ;;
-    --reconfigure)        DIRECT_ACTION="reconf";      shift ;;
-    -v|--version)         ZABBIX_VERSION="$2";         shift 2 ;;
-    -s|--server)          SERVER_IP="$2";              shift 2 ;;
-    -t|--timezone)        TIMEZONE="$2";               shift 2 ;;
-    -a|--agent)           INSTALL_AGENT=true;          shift ;;
-    -N|--no-agent)        INSTALL_AGENT=false;         shift ;;
-    --agent-version)      AGENT_VERSION="$2";          shift 2 ;;
+    --install)            DIRECT_ACTION="install";      shift ;;
+    --remove)             DIRECT_ACTION="remove";       shift ;;
+    --status)             DIRECT_ACTION="status";       shift ;;
+    --health-check)       DIRECT_ACTION="health";       shift ;;
+    --expand-disk)        DIRECT_ACTION="expand";       shift ;;
+    --backup)             DIRECT_ACTION="backup";       shift ;;
+    --restore)            DIRECT_ACTION="restore";      shift ;;
+    --tls-psk)            DIRECT_ACTION="tls";          shift ;;
+    --restart)            DIRECT_ACTION="restart";      shift ;;
+    --diagnose)           DIRECT_ACTION="diagnose";     shift ;;
+    --reconfigure)        DIRECT_ACTION="reconf";       shift ;;
+    --self-update)        DIRECT_ACTION="selfupdate";   shift ;;
+    -v|--version)         ZABBIX_VERSION="$2";          shift 2 ;;
+    -s|--server)          SERVER_IP="$2";               shift 2 ;;
+    -t|--timezone)        TIMEZONE="$2";                shift 2 ;;
+    -a|--agent)           INSTALL_AGENT=true;           shift ;;
+    -N|--no-agent)        INSTALL_AGENT=false;          shift ;;
+    --agent-version)      AGENT_VERSION="$2";           shift 2 ;;
     -w|--webhook)         WEBHOOK_URL="$2"; SEND_WEBHOOK=true; shift 2 ;;
-    -W|--no-webhook)      SEND_WEBHOOK=false;          shift ;;
-    --cache-size)         CACHE_SIZE="$2";             shift 2 ;;
-    --pollers)            START_POLLERS="$2";          shift 2 ;;
+    -W|--no-webhook)      SEND_WEBHOOK=false;           shift ;;
+    --cache-size)         CACHE_SIZE="$2";              shift 2 ;;
+    --pollers)            START_POLLERS="$2";           shift 2 ;;
     --unreachable-pollers) START_POLLERS_UNREACHABLE="$2"; shift 2 ;;
-    --slow-queries)       LOG_SLOW_QUERIES="$2";       shift 2 ;;
+    --slow-queries)       LOG_SLOW_QUERIES="$2";        shift 2 ;;
     --data-sender-frequency) DATA_SENDER_FREQUENCY="$2"; shift 2 ;;
-    --timeout)            PROXY_TIMEOUT="$2";          shift 2 ;;
-    --log-file)           LOG_FILE="$2";               shift 2 ;;
-    -y|--yes)             AUTO_YES=true;               shift ;;
-    --dry-run)            DRY_RUN=true;                shift ;;
+    --timeout)            PROXY_TIMEOUT="$2";           shift 2 ;;
+    --log-file)           LOG_FILE="$2";                shift 2 ;;
+    -y|--yes)             AUTO_YES=true;                shift ;;
+    --dry-run)            DRY_RUN=true;                 shift ;;
     -h|--help)            show_help ;;
     *) log_error "Opção desconhecida: $1"; show_help ;;
   esac
@@ -371,17 +343,17 @@ done
   && error_exit "Versão inválida: '$ZABBIX_VERSION'. Use X.Y (ex: 7.2)"
 
 # ================================================================================
-# DETECÇÃO DE SO E GERENCIADOR DE PACOTES
+# DETECÇÃO DE SO
 # ================================================================================
 check_root() { [[ $EUID -eq 0 ]] || error_exit "Execute como root (sudo $0)"; }
 
 detect_os() {
   log_info "Detectando sistema operacional..."
-  if   [[ -f /etc/oracle-release   ]]; then OS_TYPE="oracle"; OS_VERSION=$(grep -oP '\d+' /etc/oracle-release | head -1); PKG_MANAGER="dnf"
-  elif [[ -f /etc/rocky-release    ]]; then OS_TYPE="rocky";  OS_VERSION=$(grep -oP '\d+' /etc/rocky-release  | head -1); PKG_MANAGER="dnf"
-  elif [[ -f /etc/almalinux-release ]]; then OS_TYPE="alma";  OS_VERSION=$(grep -oP '\d+' /etc/almalinux-release | head -1); PKG_MANAGER="dnf"
-  elif [[ -f /etc/centos-release   ]]; then OS_TYPE="centos"; OS_VERSION=$(grep -oP '\d+' /etc/centos-release  | head -1); PKG_MANAGER="dnf"
-  elif [[ -f /etc/debian_version   ]]; then
+  if   [[ -f /etc/oracle-release    ]]; then OS_TYPE="oracle"; OS_VERSION=$(grep -oP '\d+' /etc/oracle-release    | head -1); PKG_MANAGER="dnf"
+  elif [[ -f /etc/rocky-release     ]]; then OS_TYPE="rocky";  OS_VERSION=$(grep -oP '\d+' /etc/rocky-release     | head -1); PKG_MANAGER="dnf"
+  elif [[ -f /etc/almalinux-release ]]; then OS_TYPE="alma";   OS_VERSION=$(grep -oP '\d+' /etc/almalinux-release | head -1); PKG_MANAGER="dnf"
+  elif [[ -f /etc/centos-release    ]]; then OS_TYPE="centos"; OS_VERSION=$(grep -oP '\d+' /etc/centos-release    | head -1); PKG_MANAGER="dnf"
+  elif [[ -f /etc/debian_version    ]]; then
     PKG_MANAGER="apt"
     if [[ -f /etc/lsb-release ]]; then
       source /etc/lsb-release
@@ -395,11 +367,10 @@ detect_os() {
   fi
 
   case $OS_TYPE in
-    ubuntu)       [[ "$OS_VERSION" =~ ^(20\.04|22\.04|24\.04)$ ]] || error_exit "Ubuntu $OS_VERSION não suportado" ;;
-    debian)       [[ "$OS_VERSION" =~ ^(11|12)$                ]] || error_exit "Debian $OS_VERSION não suportado" ;;
-    oracle|rocky|alma|centos) [[ "$OS_VERSION" =~ ^(8|9)$      ]] || error_exit "$OS_TYPE $OS_VERSION não suportado" ;;
+    ubuntu)                [[ "$OS_VERSION" =~ ^(20\.04|22\.04|24\.04)$ ]] || error_exit "Ubuntu $OS_VERSION não suportado" ;;
+    debian)                [[ "$OS_VERSION" =~ ^(11|12)$                ]] || error_exit "Debian $OS_VERSION não suportado" ;;
+    oracle|rocky|alma|centos) [[ "$OS_VERSION" =~ ^(8|9)$              ]] || error_exit "$OS_TYPE $OS_VERSION não suportado" ;;
   esac
-
   log_success "$OS_TYPE $OS_VERSION detectado"
 }
 
@@ -415,30 +386,24 @@ pkg_remove()  {
 # ================================================================================
 # INTERFACE VISUAL
 # ================================================================================
-
-# Barra de status em tempo real — mostrada no cabeçalho do menu
 _print_status_bar() {
   local zbx_status zbx_ver disk_pct ram_pct
-
-  if command -v zabbix_proxy &>/dev/null 2>&1; then
+  if command -v zabbix_proxy &>/dev/null; then
     if systemctl is-active --quiet zabbix-proxy 2>/dev/null; then
       zbx_status="${verde}● Ativo${reset}"
     else
       zbx_status="${vermelho}● Inativo${reset}"
     fi
-    zbx_ver=$(zabbix_proxy -V 2>/dev/null | awk '{print $3}' | head -1 2>/dev/null || echo "?")
+    zbx_ver=$(zabbix_proxy -V 2>/dev/null | awk '{print $3}' | head -1 || echo "?")
   else
-    zbx_status="${cinza}● Não instalado${reset}"
-    zbx_ver="—"
+    zbx_status="${cinza}● Não instalado${reset}"; zbx_ver="—"
   fi
-
   disk_pct=$(df / 2>/dev/null | awk 'NR==2{gsub(/%/,""); print $5}')
   ram_pct=$(free 2>/dev/null | awk '/^Mem:/{printf "%.0f", $3*100/$2}')
 
   echo -e "${cinza}┌──────────────────────────────────────────────────────────────────────────────┐${reset}"
   echo -e "${cinza}│${reset}  ${branco}Proxy:${reset} ${zbx_status} ${cinza}(v${zbx_ver})${reset}   ${cinza}│${reset}   ${branco}Disco:${reset} ${verde}${disk_pct}%${reset}   ${cinza}│${reset}   ${branco}RAM:${reset} ${verde}${ram_pct}%${reset}   ${cinza}│${reset}   ${verde}🔒 root${reset}"
-  echo -e "${cinza}└──────────────────────────────────────────────────────────────────────────────┘${reset}"
-  echo ""
+  echo -e "${cinza}└──────────────────────────────────────────────────────────────────────────────┘${reset}"; echo ""
 }
 
 print_header() {
@@ -457,8 +422,7 @@ print_header() {
 BANNER
   echo -e "║${reset}                   ${branco}${bold}ZBX Swiss Manager v${VERSION}${reset}                              ${azul}${bold}║"
   echo -e "║${reset}           ${cinza}Canivete suíço para Zabbix Proxy — Multi-distro${reset}                ${azul}${bold}║"
-  echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${reset}"
-  echo ""
+  echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${reset}"; echo ""
   _print_status_bar
 }
 
@@ -474,42 +438,51 @@ show_main_menu() {
   echo -e "  ${branco}4)${reset}  🔁 ${ciano}Reiniciar Serviços${reset}"
   echo -e "  ${branco}5)${reset}  📜 ${cinza}Ver Logs ao Vivo${reset}"
   echo -e "  ${branco}6)${reset}  📡 ${azul}Instalar Zabbix Agent2${reset}"
+  echo -e "  ${branco}7)${reset}  🩺 ${verde}Health Check Completo${reset}"
   echo ""
 
   echo -e "${azul}${bold}╔═══════════════════════════════════════════════════════════════════════════════╗"
   echo -e "║                       💾  DISCO & BANCO DE DADOS                             ║"
   echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${reset}"
-  echo -e "  ${branco}7)${reset}  📈 ${azul}Expandir Disco LVM${reset} ${verde}(sem reboot — NVMe · SCSI · virtio)${reset}"
-  echo -e "  ${branco}8)${reset}  🗜️  ${ciano}Otimizar SQLite (VACUUM)${reset}"
-  echo -e "  ${branco}9)${reset}  💾 ${verde}Backup Agora${reset}"
+  echo -e "  ${branco}8)${reset}  📈 ${azul}Expandir Disco LVM${reset} ${verde}(sem reboot — NVMe · SCSI · virtio)${reset}"
+  echo -e "  ${branco}9)${reset}  🗜️  ${ciano}Otimizar SQLite (VACUUM)${reset}"
+  echo -e "  ${branco}10)${reset} 💾 ${verde}Backup Agora${reset}"
+  echo -e "  ${branco}11)${reset} ♻️  ${amarelo}Restaurar Backup${reset}"
+  echo ""
+
+  echo -e "${vermelho}${bold}╔═══════════════════════════════════════════════════════════════════════════════╗"
+  echo -e "║                       🔒  SEGURANÇA                                          ║"
+  echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${reset}"
+  echo -e "  ${branco}12)${reset} 🔐 ${vermelho}Configurar TLS/PSK${reset}"
   echo ""
 
   echo -e "${roxo}${bold}╔═══════════════════════════════════════════════════════════════════════════════╗"
   echo -e "║                       🔧  MANUTENÇÃO                                         ║"
   echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${reset}"
-  echo -e "  ${branco}10)${reset} 🔄 ${roxo}Verificar Atualizações Zabbix${reset}"
-  echo -e "  ${branco}11)${reset} ⚙️  ${bege}Configurar Manutenção Automática${reset}"
-  echo -e "  ${branco}12)${reset} 🧹 ${ciano}Limpeza de Sistema${reset}"
+  echo -e "  ${branco}13)${reset} 🔄 ${roxo}Verificar Atualizações Zabbix${reset}"
+  echo -e "  ${branco}14)${reset} ⚙️  ${bege}Configurar Manutenção Automática${reset}"
+  echo -e "  ${branco}15)${reset} 🧹 ${ciano}Limpeza de Sistema${reset}"
   echo ""
 
   echo -e "${amarelo}${bold}╔═══════════════════════════════════════════════════════════════════════════════╗"
   echo -e "║                       📊  SISTEMA                                            ║"
   echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${reset}"
-  echo -e "  ${branco}13)${reset} 📋 ${verde}Informações Completas${reset}"
-  echo -e "  ${branco}14)${reset} 🔍 ${azul}Monitor em Tempo Real${reset}"
+  echo -e "  ${branco}16)${reset} 📋 ${verde}Informações Completas${reset}"
+  echo -e "  ${branco}17)${reset} 🔍 ${azul}Monitor em Tempo Real${reset}"
+  echo -e "  ${branco}18)${reset} 📄 ${cinza}Exportar Diagnóstico${reset}"
   echo ""
 
   echo -e "${cinza}${bold}╔═══════════════════════════════════════════════════════════════════════════════╗"
   echo -e "║                       ⚙️   CONFIGURAÇÕES                                     ║"
   echo -e "╚═══════════════════════════════════════════════════════════════════════════════╝${reset}"
-  echo -e "  ${branco}15)${reset} 🛠️  ${bege}Reconfigurar ZBX Swiss${reset} ${cinza}(Server IP, Timezone, Webhook...)${reset}"
+  echo -e "  ${branco}19)${reset} 🛠️  ${bege}Reconfigurar ZBX Swiss${reset} ${cinza}(Server IP, Timezone, Webhook...)${reset}"
+  echo -e "  ${branco}20)${reset} ⬆️  ${verde}Atualizar ZBX Swiss${reset} ${cinza}(busca versão mais recente no GitHub)${reset}"
   echo -e "  ${branco}0)${reset}  🚪 ${cinza}Sair${reset}"
   echo ""
 
   echo -e "${ciano}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}"
   echo -e "  ${cinza}Config: $CONFIG_FILE${reset}  ${cinza}|${reset}  ${cinza}Log: $LOG_FILE${reset}"
-  echo -e "${ciano}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}"
-  echo ""
+  echo -e "${ciano}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}"; echo ""
 }
 
 pause_prompt() {
@@ -520,7 +493,7 @@ pause_prompt() {
 }
 
 # ================================================================================
-# INSTALAÇÃO DO ZABBIX PROXY
+# CONECTIVIDADE
 # ================================================================================
 check_connectivity() {
   log_info "Verificando acesso ao repo.zabbix.com..."
@@ -529,6 +502,22 @@ check_connectivity() {
   log_success "Conectividade OK"
 }
 
+connectivity_check_server() {
+  [[ -z "$SERVER_IP" ]] && { log_warning "SERVER_IP não configurado — pulando teste"; return 0; }
+  log_info "Testando conexão com $SERVER_IP:10051..."
+  if bash -c "echo >/dev/tcp/$SERVER_IP/10051" 2>/dev/null; then
+    log_success "Porta 10051 acessível em $SERVER_IP"
+    return 0
+  else
+    log_error "Porta 10051 INACESSÍVEL em $SERVER_IP"
+    log_warning "Verifique: firewall no servidor Zabbix, IP correto, serviço rodando"
+    return 1
+  fi
+}
+
+# ================================================================================
+# INSTALAÇÃO
+# ================================================================================
 configure_timezone() {
   log_info "Configurando timezone: $TIMEZONE..."
   run_cmd timedatectl set-timezone "$TIMEZONE" || error_exit "Timezone inválido: $TIMEZONE"
@@ -723,20 +712,15 @@ EOF
     cat "$tmp" >> "$conf"
     run_cmd systemctl enable --now zabbix-agent2
   fi
-  rm -f "$tmp"
-  log_success "Agent2 configurado"
+  rm -f "$tmp"; log_success "Agent2 configurado"
 }
 
-install_agent() {
-  [[ "$AGENT_VERSION" == "2" ]] && _install_agent2 || _install_agent1
-}
+install_agent() { [[ "$AGENT_VERSION" == "2" ]] && _install_agent2 || _install_agent1; }
 
 install_zabbix_proxy() {
   print_header
-  echo -e "${verde}${bold}═══ 📦 INSTALAÇÃO DO ZABBIX PROXY ═══════════════════════════════════════════${reset}"
-  echo ""
-  echo -e "  ${branco}Server:${reset}  ${verde}$SERVER_IP${reset}   ${branco}Zabbix:${reset} ${verde}v$ZABBIX_VERSION${reset}   ${branco}Agente:${reset} ${verde}$([ "$INSTALL_AGENT" = true ] && echo "v$AGENT_VERSION" || echo "Não")${reset}"
-  echo ""
+  echo -e "${verde}${bold}═══ 📦 INSTALAÇÃO DO ZABBIX PROXY ═══════════════════════════════════════════${reset}"; echo ""
+  echo -e "  ${branco}Server:${reset}  ${verde}$SERVER_IP${reset}   ${branco}Zabbix:${reset} ${verde}v$ZABBIX_VERSION${reset}   ${branco}Agente:${reset} ${verde}$([ "$INSTALL_AGENT" = true ] && echo "v$AGENT_VERSION" || echo "Não")${reset}"; echo ""
   confirm "Iniciar instalação?" || return
   echo ""
   check_connectivity
@@ -747,6 +731,8 @@ install_zabbix_proxy() {
   configure_proxy
   start_services
   [[ $INSTALL_AGENT == true ]] && install_agent || true
+  echo ""; log_info "Verificando conectividade com o servidor Zabbix..."
+  connectivity_check_server || log_warning "Verifique a conectividade com $SERVER_IP antes de ativar o proxy no servidor"
   send_webhook
   echo ""; log_success "Instalação concluída!"; echo ""
   check_status_inline
@@ -757,13 +743,10 @@ install_zabbix_proxy() {
 # ================================================================================
 remove_zabbix() {
   print_header
-  echo -e "${vermelho}${bold}═══ 🗑️  REMOÇÃO DO ZABBIX PROXY ════════════════════════════════════════════${reset}"
-  echo ""
-  echo -e "${amarelo}${bold}⚠️  IRREVERSÍVEL: pacotes · config · banco · logs serão removidos${reset}"
-  echo ""
+  echo -e "${vermelho}${bold}═══ 🗑️  REMOÇÃO DO ZABBIX PROXY ════════════════════════════════════════════${reset}"; echo ""
+  echo -e "${amarelo}${bold}⚠️  IRREVERSÍVEL: pacotes · config · banco · logs serão removidos${reset}"; echo ""
   local r; read -rp "$(echo -e "${vermelho}Digite ${bold}SIM${reset}${vermelho} para confirmar: ${reset}")" r
   [[ "$r" == "SIM" ]] || { log_info "Cancelado."; return; }
-
   systemctl stop zabbix-proxy zabbix-agent zabbix-agent2 2>/dev/null || true
   systemctl disable zabbix-proxy zabbix-agent zabbix-agent2 2>/dev/null || true
   case $PKG_MANAGER in
@@ -781,23 +764,19 @@ remove_zabbix() {
 # STATUS E LOGS
 # ================================================================================
 check_status_inline() {
-  echo -e "${amarelo}${bold}═══ 📊 STATUS ═══════════════════════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${amarelo}${bold}═══ 📊 STATUS ═══════════════════════════════════════════════════════════════${reset}"; echo ""
   if ! command -v zabbix_proxy &>/dev/null; then log_error "Zabbix Proxy não instalado"; return; fi
-
   systemctl is-active --quiet zabbix-proxy 2>/dev/null \
     && log_success "zabbix-proxy: ${verde}Ativo${reset}" \
     || log_error   "zabbix-proxy: ${vermelho}Inativo${reset}"
-
   for svc in zabbix-agent2 zabbix-agent; do
     systemctl is-active --quiet "$svc" 2>/dev/null \
       && { log_success "${svc}: ${verde}Ativo${reset}"; break; } || true
   done
-
   log_info "Versão: $(zabbix_proxy -V 2>/dev/null | head -1 || echo N/A)"
-  [[ -f "$ZBX_CONF"  ]] && log_success "Config: $ZBX_CONF" || log_error "Config não encontrada"
-  [[ -f "$DB_FILE"   ]] && log_success "Banco: $DB_FILE ($(du -h "$DB_FILE" | cut -f1))" \
-                         || log_error   "Banco não encontrado"
+  [[ -f "$ZBX_CONF" ]] && log_success "Config: $ZBX_CONF" || log_error "Config não encontrada"
+  [[ -f "$DB_FILE"  ]] && log_success "Banco: $DB_FILE ($(du -h "$DB_FILE" | cut -f1))" \
+                        || log_error   "Banco não encontrado"
   echo ""; log_info "Logs recentes:"
   journalctl -u zabbix-proxy -n 8 --no-pager 2>/dev/null || true
 }
@@ -807,8 +786,7 @@ check_status() { print_header; check_status_inline; }
 view_logs() {
   print_header
   echo -e "${cinza}${bold}═══ 📜 LOGS AO VIVO ═══════════════════════════════════════════════════════${reset}"
-  echo -e "${amarelo}  Pressione ${vermelho}CTRL+C${amarelo} para sair${reset}"
-  echo ""
+  echo -e "${amarelo}  Pressione ${vermelho}CTRL+C${amarelo} para sair${reset}"; echo ""
   journalctl -u zabbix-proxy -f --no-pager 2>/dev/null \
     || { log_warning "journalctl não disponível — exibindo arquivo de log:"
          tail -f /var/log/zabbix/zabbix_proxy.log 2>/dev/null || log_error "Log não encontrado"; }
@@ -819,10 +797,8 @@ view_logs() {
 # ================================================================================
 restart_services() {
   print_header
-  echo -e "${ciano}${bold}═══ 🔁 REINICIAR SERVIÇOS ══════════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${ciano}${bold}═══ 🔁 REINICIAR SERVIÇOS ══════════════════════════════════════════════════${reset}"; echo ""
   confirm "Reiniciar zabbix-proxy e agentes?" || return
-
   for svc in zabbix-proxy zabbix-agent2 zabbix-agent; do
     if systemctl is-enabled --quiet "$svc" 2>/dev/null; then
       systemctl restart "$svc" 2>/dev/null \
@@ -830,17 +806,136 @@ restart_services() {
         || log_warning "$svc falhou ao reiniciar"
     fi
   done
-  echo ""
-  check_status_inline
+  echo ""; check_status_inline
 }
 
 # ================================================================================
-# INSTALAR AGENT2 (menu standalone)
+# HEALTH CHECK COMPLETO
+# ================================================================================
+health_check() {
+  print_header
+  echo -e "${verde}${bold}═══ 🩺 HEALTH CHECK COMPLETO ═══════════════════════════════════════════════${reset}"; echo ""
+
+  local score=0 total=0
+
+  _hc() {
+    local label="$1" ok="$2" detail="${3:-}"
+    (( total++ ))
+    if [[ "$ok" == "true" ]]; then
+      (( score++ ))
+      echo -e "  ${verde}✓${reset}  ${branco}$label${reset}${detail:+  ${cinza}($detail)${reset}}"
+    else
+      echo -e "  ${vermelho}✗${reset}  ${branco}$label${reset}${detail:+  ${cinza}($detail)${reset}}"
+    fi
+  }
+
+  echo -e "${azul}${bold}  ── Zabbix Proxy ────────────────────────────────────────────────────────────${reset}"
+
+  # 1. Instalado
+  if command -v zabbix_proxy &>/dev/null; then
+    _hc "Zabbix Proxy instalado" true "$(zabbix_proxy -V 2>/dev/null | head -1 | awk '{print $3}')"
+  else
+    _hc "Zabbix Proxy instalado" false "não encontrado"
+  fi
+
+  # 2. Serviço ativo
+  systemctl is-active --quiet zabbix-proxy 2>/dev/null \
+    && _hc "Serviço ativo" true \
+    || _hc "Serviço ativo" false "execute: systemctl start zabbix-proxy"
+
+  # 3. Config válida
+  if [[ -f /usr/sbin/zabbix_proxy && -f "$ZBX_CONF" ]]; then
+    /usr/sbin/zabbix_proxy -T -c "$ZBX_CONF" &>/dev/null \
+      && _hc "Configuração válida" true "$ZBX_CONF" \
+      || _hc "Configuração válida" false "erro em $ZBX_CONF"
+  else
+    _hc "Configuração válida" false "arquivo não encontrado"
+  fi
+
+  # 4. Banco de dados
+  if [[ -f "$DB_FILE" ]]; then
+    local integrity; integrity=$(sqlite3 "$DB_FILE" "PRAGMA integrity_check;" 2>/dev/null | head -1)
+    [[ "$integrity" == "ok" ]] \
+      && _hc "Banco SQLite íntegro" true "$(du -h "$DB_FILE" | cut -f1)" \
+      || _hc "Banco SQLite íntegro" false "$integrity"
+  else
+    _hc "Banco SQLite íntegro" false "não encontrado em $DB_FILE"
+  fi
+
+  echo ""
+  echo -e "${azul}${bold}  ── Rede & Conectividade ────────────────────────────────────────────────────${reset}"
+
+  # 5. Conectividade com servidor Zabbix
+  if [[ -n "$SERVER_IP" ]]; then
+    bash -c "echo >/dev/tcp/$SERVER_IP/10051" 2>/dev/null \
+      && _hc "Conectividade Proxy→Server (10051)" true "$SERVER_IP" \
+      || _hc "Conectividade Proxy→Server (10051)" false "$SERVER_IP inacessível"
+  else
+    _hc "Conectividade Proxy→Server (10051)" false "SERVER_IP não configurado"
+  fi
+
+  # 6. Acesso à internet (repo)
+  curl -sf --max-time 5 "https://repo.zabbix.com" -o /dev/null 2>/dev/null \
+    && _hc "Acesso a repo.zabbix.com" true \
+    || _hc "Acesso a repo.zabbix.com" false "sem internet ou DNS"
+
+  echo ""
+  echo -e "${azul}${bold}  ── Recursos do Sistema ─────────────────────────────────────────────────────${reset}"
+
+  # 7. Disco
+  local disk_pct; disk_pct=$(df / | awk 'NR==2{gsub(/%/,""); print $5}')
+  (( disk_pct < 85 )) \
+    && _hc "Uso de disco" true "${disk_pct}% (< 85%)" \
+    || _hc "Uso de disco" false "${disk_pct}% — CRÍTICO (> 85%)"
+
+  # 8. RAM
+  local ram_pct; ram_pct=$(free | awk '/^Mem:/{printf "%.0f", $3*100/$2}')
+  (( ram_pct < 90 )) \
+    && _hc "Uso de RAM" true "${ram_pct}% (< 90%)" \
+    || _hc "Uso de RAM" false "${ram_pct}% — CRÍTICO (> 90%)"
+
+  echo ""
+  echo -e "${azul}${bold}  ── Manutenção ──────────────────────────────────────────────────────────────${reset}"
+
+  # 9. Logrotate
+  [[ -f /etc/logrotate.d/zabbix-proxy ]] \
+    && _hc "Logrotate configurado" true \
+    || _hc "Logrotate configurado" false "execute opção 14"
+
+  # 10. Cron backup
+  crontab -l 2>/dev/null | grep -q "zabbix-backup" \
+    && _hc "Cron de backup ativo" true "todo dia às 02:00" \
+    || _hc "Cron de backup ativo" false "execute opção 14"
+
+  # 11. Backups existentes
+  local nbak; nbak=$(ls /var/backups/zabbix-proxy/zabbix_db_*.db.gz 2>/dev/null | wc -l)
+  (( nbak > 0 )) \
+    && _hc "Backups disponíveis" true "$nbak arquivo(s) em /var/backups/zabbix-proxy" \
+    || _hc "Backups disponíveis" false "nenhum — execute opção 10"
+
+  # 12. TLS/PSK
+  [[ -f /etc/zabbix/zabbix_proxy.psk ]] \
+    && _hc "TLS/PSK configurado" true \
+    || _hc "TLS/PSK configurado" false "opcional — execute opção 12"
+
+  echo ""
+  echo -e "${ciano}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${reset}"
+  local pct=$(( score * 100 / total ))
+  echo -e "  Resultado: ${verde}${bold}${score}/${total}${reset} checks OK  (${pct}%)"
+  echo ""
+  if   (( score == total ));          then echo -e "  ${verde}${bold}✓  Tudo OK — proxy completamente saudável!${reset}"
+  elif (( pct >= 75 ));               then echo -e "  ${amarelo}${bold}⚠  Atenção: alguns itens merecem revisão.${reset}"
+  else                                     echo -e "  ${vermelho}${bold}✗  Problemas críticos detectados! Ação necessária.${reset}"
+  fi
+  echo ""
+}
+
+# ================================================================================
+# AGENT2 STANDALONE
 # ================================================================================
 install_agent2_menu() {
   print_header
-  echo -e "${azul}${bold}═══ 📡 INSTALAR ZABBIX AGENT2 ══════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${azul}${bold}═══ 📡 INSTALAR ZABBIX AGENT2 ══════════════════════════════════════════════${reset}"; echo ""
   command -v zabbix_agent2 &>/dev/null || add_zabbix_repo
   _install_agent2
   echo ""; systemctl status zabbix-agent2 --no-pager 2>/dev/null | head -10 || true
@@ -916,8 +1011,7 @@ _fix_gpt() {
 expand_disk() {
   print_header
   echo -e "${azul}${bold}═══ 📈 EXPANSÃO DE DISCO LVM — SEM REBOOT ══════════════════════════════════${reset}"
-  echo -e "${cinza}  SCSI (sda) · virtio-blk (vda) · virtio-scsi · NVMe (nvme0n1) · Xen${reset}"
-  echo ""
+  echo -e "${cinza}  SCSI (sda) · virtio-blk (vda) · virtio-scsi · NVMe (nvme0n1) · Xen${reset}"; echo ""
 
   case $PKG_MANAGER in
     apt) pkg_install lvm2 parted cloud-guest-utils gdisk 2>/dev/null || true ;;
@@ -1019,12 +1113,11 @@ expand_disk() {
 }
 
 # ================================================================================
-# BANCO DE DADOS / BACKUP
+# BANCO DE DADOS / BACKUP / RESTORE
 # ================================================================================
 optimize_database() {
   print_header
-  echo -e "${ciano}${bold}═══ 🗜️  OTIMIZAR SQLITE (VACUUM) ════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${ciano}${bold}═══ 🗜️  OTIMIZAR SQLITE (VACUUM) ════════════════════════════════════════════${reset}"; echo ""
   [[ -f "$DB_FILE" ]] || { log_error "Banco não encontrado: $DB_FILE"; return; }
   local b; b=$(du -h "$DB_FILE" | cut -f1)
   log_info "Tamanho atual: $b"
@@ -1041,14 +1134,13 @@ optimize_database() {
 
 backup_now() {
   print_header
-  echo -e "${verde}${bold}═══ 💾 BACKUP AGORA ════════════════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${verde}${bold}═══ 💾 BACKUP AGORA ════════════════════════════════════════════════════════${reset}"; echo ""
   local dir="/var/backups/zabbix-proxy"
-  local date; date=$(date +%Y-%m-%d_%H-%M-%S)
+  local ts; ts=$(date +%Y-%m-%d_%H-%M-%S)
   mkdir -p "$dir"
 
   if [[ -f "$DB_FILE" ]]; then
-    local bak="${dir}/zabbix_db_${date}.db"
+    local bak="${dir}/zabbix_db_${ts}.db"
     if sqlite3 "$DB_FILE" ".backup '${bak}'" 2>/dev/null; then
       gzip -f "$bak" && log_success "Banco: ${bak}.gz"
     else log_error "Falha no backup do banco"; fi
@@ -1057,20 +1149,137 @@ backup_now() {
   fi
 
   if [[ -f "$ZBX_CONF" ]]; then
-    cp "$ZBX_CONF" "${dir}/zabbix_conf_${date}.conf"
-    log_success "Config: ${dir}/zabbix_conf_${date}.conf"
+    cp "$ZBX_CONF" "${dir}/zabbix_conf_${ts}.conf"
+    log_success "Config: ${dir}/zabbix_conf_${ts}.conf"
   fi
 
   log_success "Backup salvo em: $dir"
 }
 
+restore_backup() {
+  print_header
+  echo -e "${amarelo}${bold}═══ ♻️  RESTAURAR BACKUP ════════════════════════════════════════════════════${reset}"; echo ""
+
+  local dir="/var/backups/zabbix-proxy"
+  [[ -d "$dir" ]] || { log_error "Diretório de backup não encontrado: $dir"; return; }
+
+  local -a backups
+  while IFS= read -r f; do backups+=("$f"); done < <(ls -t "$dir"/zabbix_db_*.db.gz 2>/dev/null || true)
+  [[ ${#backups[@]} -eq 0 ]] && { log_error "Nenhum backup encontrado em $dir"; log_info "Execute primeiro o Backup (opção 10)"; return; }
+
+  echo -e "${branco}  Backups disponíveis:${reset}"; echo ""
+  local i=1
+  for f in "${backups[@]}"; do
+    local ts_label; ts_label=$(basename "$f" | sed 's/zabbix_db_//;s/\.db\.gz//')
+    echo -e "  ${bege}${i})${reset}  ${ts_label}  ${cinza}($(du -h "$f" | cut -f1))${reset}"
+    (( i++ ))
+  done
+  echo ""
+
+  local sel
+  read -rp "$(echo -e "${amarelo}  Escolha o backup (1-${#backups[@]}): ${reset}")" sel
+  [[ "$sel" =~ ^[0-9]+$ && "$sel" -ge 1 && "$sel" -le "${#backups[@]}" ]] \
+    || { log_error "Opção inválida"; return; }
+
+  local chosen="${backups[$((sel-1))]}"
+  echo ""
+  echo -e "${vermelho}${bold}  ⚠️  ATENÇÃO: o banco de dados atual será substituído!${reset}"
+  echo -e "  Arquivo: ${verde}$(basename "$chosen")${reset}"
+  echo ""
+  confirm "Restaurar este backup?" || return
+
+  systemctl stop zabbix-proxy 2>/dev/null || true
+  local bak_current="${DB_FILE}.pre-restore-$(date +%F_%T)"
+  [[ -f "$DB_FILE" ]] && { cp "$DB_FILE" "$bak_current"; log_info "Banco atual preservado: $bak_current"; }
+
+  mkdir -p "$(dirname "$DB_FILE")"
+  local tmp_restore="${DB_FILE}.restore.tmp"
+
+  if zcat "$chosen" > "$tmp_restore" 2>/dev/null; then
+    local check; check=$(sqlite3 "$tmp_restore" "PRAGMA integrity_check;" 2>/dev/null | head -1)
+    if [[ "$check" == "ok" ]]; then
+      mv "$tmp_restore" "$DB_FILE"
+      chown zabbix:zabbix "$DB_FILE"; chmod 640 "$DB_FILE"
+      log_success "Banco restaurado com sucesso!"
+      systemctl start zabbix-proxy 2>/dev/null \
+        && log_success "zabbix-proxy reiniciado" \
+        || log_error "Falha ao reiniciar — verifique: journalctl -u zabbix-proxy"
+    else
+      rm -f "$tmp_restore"
+      log_error "Backup corrompido (integrity: $check)! Restaurando versão anterior..."
+      [[ -f "$bak_current" ]] && cp "$bak_current" "$DB_FILE" && log_success "Banco anterior restaurado"
+      systemctl start zabbix-proxy 2>/dev/null || true
+    fi
+  else
+    log_error "Falha ao descompactar backup"
+    rm -f "$tmp_restore"
+    systemctl start zabbix-proxy 2>/dev/null || true
+  fi
+}
+
 # ================================================================================
-# MANUTENÇÃO / ATUALIZAÇÕES / LIMPEZA
+# SEGURANÇA — TLS/PSK
+# ================================================================================
+setup_tls_psk() {
+  print_header
+  echo -e "${vermelho}${bold}═══ 🔐 CONFIGURAR TLS/PSK ══════════════════════════════════════════════════${reset}"; echo ""
+
+  command -v openssl &>/dev/null || pkg_install openssl
+
+  local psk_file="/etc/zabbix/zabbix_proxy.psk"
+  local psk_identity="zbx-proxy-$(hostname)"
+
+  if [[ -f "$psk_file" ]]; then
+    log_info "PSK já configurado: $psk_file"
+    local cur_id; cur_id=$(grep -i "TLSPSKIdentity" "$ZBX_CONF" 2>/dev/null | cut -d= -f2 || echo "não encontrada")
+    log_info "Identidade atual: $cur_id"
+    echo ""
+    confirm "Regenerar chave PSK (substitui a atual)?" || return
+  fi
+
+  local psk_key
+  psk_key=$(openssl rand -hex 32 2>/dev/null \
+    || dd if=/dev/urandom bs=32 count=1 2>/dev/null | od -An -tx1 | tr -d ' \n')
+
+  echo "$psk_key" > "$psk_file"
+  chown zabbix:zabbix "$psk_file" 2>/dev/null || true
+  chmod 640 "$psk_file"
+  log_success "Chave PSK gerada: $psk_file"
+
+  if [[ -f "$ZBX_CONF" ]]; then
+    sed -i '/^TLS/d' "$ZBX_CONF"
+    cat >> "$ZBX_CONF" <<EOF
+
+# TLS/PSK — configurado por ZBX Swiss Manager
+TLSConnect=psk
+TLSAccept=psk
+TLSPSKFile=$psk_file
+TLSPSKIdentity=$psk_identity
+EOF
+    log_success "TLS configurado em $ZBX_CONF"
+  fi
+
+  systemctl restart zabbix-proxy 2>/dev/null \
+    && log_success "Proxy reiniciado com TLS/PSK" \
+    || log_warning "Reinicie manualmente: systemctl restart zabbix-proxy"
+
+  echo ""
+  echo -e "${amarelo}${bold}═══ Configure no Servidor Zabbix ════════════════════════════════════════════${reset}"
+  echo -e "  Vá em: ${verde}Administration → Proxies → [seu proxy] → Encryption${reset}"
+  echo -e "  Connections from proxy: ${verde}PSK${reset}"
+  echo -e ""
+  echo -e "  ${branco}PSK identity:${reset}  ${verde}${psk_identity}${reset}"
+  echo -e "  ${branco}PSK value:${reset}     ${verde}${psk_key}${reset}"
+  echo ""
+  echo -e "${cinza}  Chave salva em: $psk_file — guarde em lugar seguro!${reset}"
+}
+
+# ================================================================================
+# MANUTENÇÃO
 # ================================================================================
 check_updates() {
   print_header
-  echo -e "${roxo}${bold}═══ 🔄 VERIFICAR ATUALIZAÇÕES ══════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${roxo}${bold}═══ 🔄 VERIFICAR ATUALIZAÇÕES ══════════════════════════════════════════════${reset}"; echo ""
   command -v zabbix_proxy &>/dev/null || { log_error "Zabbix Proxy não instalado"; return; }
   pkg_update
   local updates=""
@@ -1094,8 +1303,7 @@ check_updates() {
 
 setup_maintenance() {
   print_header
-  echo -e "${bege}${bold}═══ ⚙️  MANUTENÇÃO AUTOMÁTICA ═══════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${bege}${bold}═══ ⚙️  MANUTENÇÃO AUTOMÁTICA ═══════════════════════════════════════════════${reset}"; echo ""
   log_info "Configurando logrotate..."
   cat > /etc/logrotate.d/zabbix-proxy <<'EOF'
 /var/log/zabbix/zabbix_proxy.log {
@@ -1153,8 +1361,7 @@ BACKUP
 
 system_cleanup() {
   print_header
-  echo -e "${ciano}${bold}═══ 🧹 LIMPEZA DE SISTEMA ══════════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${ciano}${bold}═══ 🧹 LIMPEZA DE SISTEMA ══════════════════════════════════════════════════${reset}"; echo ""
   case $PKG_MANAGER in
     apt) apt-get clean; apt-get autoclean; apt-get autoremove -y; log_success "Cache APT limpo" ;;
     dnf) dnf clean all; dnf autoremove -y; log_success "Cache DNF limpo" ;;
@@ -1162,40 +1369,34 @@ system_cleanup() {
   journalctl --vacuum-time=7d 2>/dev/null && log_success "Logs do systemd (7d)" || true
   rm -rf /tmp/* /var/tmp/* 2>/dev/null || true; log_success "Arquivos temporários removidos"
   echo ""; log_success "Limpeza concluída!"
-  df -h / | awk 'NR==2{printf "  💾 Livre: %s de %s (%s usado)\n", $4, $2, $5}'
+  df -h / | awk 'NR==2{printf "  Livre: %s de %s (%s usado)\n", $4, $2, $5}'
 }
 
 # ================================================================================
-# SISTEMA — INFO E MONITOR
+# SISTEMA — INFO, MONITOR, DIAGNÓSTICO
 # ================================================================================
 show_system_info() {
   print_header
-  echo -e "${verde}${bold}═══ 📋 INFORMAÇÕES DO SISTEMA ══════════════════════════════════════════════${reset}"
-  echo ""
+  echo -e "${verde}${bold}═══ 📋 INFORMAÇÕES DO SISTEMA ══════════════════════════════════════════════${reset}"; echo ""
   echo -e "${azul}${bold}🖥️  SO${reset}"
   echo -e "  ${verde}$OS_TYPE $OS_VERSION${reset}  |  Kernel: ${verde}$(uname -r)${reset}  |  Arch: ${verde}$(uname -m)${reset}"
-  echo -e "  Hostname: ${verde}$(hostname)${reset}  |  Uptime: ${verde}$(uptime -p)${reset}"
-  echo ""
+  echo -e "  Hostname: ${verde}$(hostname)${reset}  |  Uptime: ${verde}$(uptime -p)${reset}"; echo ""
   echo -e "${azul}${bold}💻 HARDWARE${reset}"
   [[ -f /proc/cpuinfo ]] && echo -e "  CPU: ${verde}$(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2 | xargs)${reset}"
-  echo -e "  Cores: ${verde}$(nproc)${reset}  |  RAM: ${verde}$(free -h | awk '/^Mem:/{print $2}') total / $(free -h | awk '/^Mem:/{print $7}') livre${reset}"
-  echo ""
+  echo -e "  Cores: ${verde}$(nproc)${reset}  |  RAM: ${verde}$(free -h | awk '/^Mem:/{print $2}') total / $(free -h | awk '/^Mem:/{print $7}') livre${reset}"; echo ""
   echo -e "${azul}${bold}💾 DISCO${reset}"
-  df -h | grep "^/dev/" | awk '{printf "  %-22s  livre: %-8s  total: %-8s  (%s)\n", $1, $4, $2, $5}'
-  echo ""
+  df -h | grep "^/dev/" | awk '{printf "  %-22s  livre: %-8s  total: %-8s  (%s)\n", $1, $4, $2, $5}'; echo ""
   echo -e "${azul}${bold}🌐 REDE${reset}"
   ip -4 addr show 2>/dev/null | grep -oP '(?<=inet\s)\d+(\.\d+){3}' | grep -v '^127\.' \
     | while read -r ip; do echo -e "  Privado: ${verde}${ip}${reset}"; done
-  echo -e "  Público: ${verde}$(curl -sf --max-time 5 ifconfig.me 2>/dev/null || echo N/A)${reset}"
-  echo ""
+  echo -e "  Público: ${verde}$(curl -sf --max-time 5 ifconfig.me 2>/dev/null || echo N/A)${reset}"; echo ""
   if command -v zabbix_proxy &>/dev/null; then
     echo -e "${azul}${bold}📊 ZABBIX PROXY${reset}"
     echo -e "  Versão: ${verde}$(zabbix_proxy -V 2>/dev/null | head -1 | awk '{print $3}')${reset}"
     systemctl is-active --quiet zabbix-proxy \
       && echo -e "  Status: ${verde}✓ Ativo${reset}" \
       || echo -e "  Status: ${vermelho}✗ Inativo${reset}"
-    [[ -f "$DB_FILE" ]] && echo -e "  Banco: ${verde}$(du -h "$DB_FILE" | cut -f1)${reset}"
-    echo ""
+    [[ -f "$DB_FILE" ]] && echo -e "  Banco: ${verde}$(du -h "$DB_FILE" | cut -f1)${reset}"; echo ""
   fi
   echo -e "${azul}${bold}⚡ PERFORMANCE${reset}"
   echo -e "  Load: ${verde}$(uptime | awk -F'load average:' '{print $2}')${reset}"
@@ -1236,6 +1437,133 @@ monitor_resources() {
   done
 }
 
+export_diagnostics() {
+  print_header
+  echo -e "${cinza}${bold}═══ 📄 EXPORTAR DIAGNÓSTICO ════════════════════════════════════════════════${reset}"; echo ""
+
+  local out="/tmp/zbx-swiss-diag-$(date +%Y%m%d_%H%M%S).txt"
+  log_info "Coletando informações..."
+
+  {
+    echo "========================================================"
+    echo "  ZBX Swiss Manager v${VERSION} — Relatório de Diagnóstico"
+    echo "  Gerado: $(date)"
+    echo "  Hostname: $(hostname)"
+    echo "========================================================"
+    echo ""
+    echo "--- Sistema Operacional ---"
+    uname -a
+    cat /etc/os-release 2>/dev/null | grep -E "^(NAME|VERSION)=" || true
+    echo "Uptime: $(uptime)"
+    echo ""
+    echo "--- Hardware ---"
+    echo "CPU cores: $(nproc)"
+    grep -m1 'model name' /proc/cpuinfo 2>/dev/null || true
+    free -h
+    echo ""
+    echo "--- Disco ---"
+    df -hT
+    echo ""
+    echo "--- Processos Zabbix ---"
+    ps aux 2>/dev/null | grep -i zabbix | grep -v grep || echo "(nenhum)"
+    echo ""
+    echo "--- Zabbix Proxy ---"
+    zabbix_proxy -V 2>/dev/null || echo "não instalado"
+    echo ""
+    echo "--- Status do Serviço ---"
+    systemctl status zabbix-proxy --no-pager 2>/dev/null | head -25 || true
+    echo ""
+    echo "--- Configuração (dados sensíveis omitidos) ---"
+    if [[ -f "$ZBX_CONF" ]]; then
+      grep -v -iE "^(TLSPSKFile|PSK|Password|Secret)" "$ZBX_CONF" \
+        | grep -v "^#" | grep -v "^$" || true
+    else
+      echo "Arquivo não encontrado: $ZBX_CONF"
+    fi
+    echo ""
+    echo "--- Banco de Dados ---"
+    if [[ -f "$DB_FILE" ]]; then
+      echo "Tamanho: $(du -h "$DB_FILE" | cut -f1)"
+      echo "Integrity check: $(sqlite3 "$DB_FILE" 'PRAGMA integrity_check;' 2>/dev/null | head -1)"
+      echo "Tabelas: $(sqlite3 "$DB_FILE" "SELECT count(*) FROM sqlite_master WHERE type='table';" 2>/dev/null)"
+    else
+      echo "Banco não encontrado: $DB_FILE"
+    fi
+    echo ""
+    echo "--- Rede ---"
+    ip -4 addr show 2>/dev/null | grep -E "(inet|UP)" || true
+    echo ""
+    echo "--- Portas Zabbix ---"
+    ss -tlnp 2>/dev/null | grep -E "(10050|10051)" || echo "(nenhuma porta Zabbix detectada)"
+    echo ""
+    echo "--- Logs Recentes (50 linhas) ---"
+    journalctl -u zabbix-proxy -n 50 --no-pager 2>/dev/null || \
+      tail -50 /var/log/zabbix/zabbix_proxy.log 2>/dev/null || echo "(sem logs)"
+    echo ""
+    echo "--- Crontab ---"
+    crontab -l 2>/dev/null | grep -i zabbix || echo "(sem cron zabbix)"
+    echo ""
+    echo "--- Backups Disponíveis ---"
+    ls -lh /var/backups/zabbix-proxy/ 2>/dev/null || echo "(nenhum backup)"
+    echo ""
+    echo "========================================================"
+    echo "  Fim do relatório"
+    echo "========================================================"
+  } > "$out" 2>&1
+
+  log_success "Diagnóstico salvo: ${verde}$out${reset}"
+  echo ""
+  echo -e "${amarelo}  ATENÇÃO: revise o arquivo antes de compartilhar — pode conter IPs internos.${reset}"
+  echo -e "${cinza}  Para copiar: scp root@$(hostname):${out} ./diagnóstico.txt${reset}"
+}
+
+# ================================================================================
+# SELF-UPDATE
+# ================================================================================
+self_update() {
+  print_header
+  echo -e "${verde}${bold}═══ ⬆️  ATUALIZAR ZBX SWISS ════════════════════════════════════════════════${reset}"; echo ""
+  log_info "Buscando versão mais recente em GitHub..."
+  log_info "URL: $GITHUB_RAW_URL"; echo ""
+
+  local tmp; tmp=$(mktemp /tmp/zbx-swiss-update.XXXXXX)
+
+  if ! curl -sf --max-time 30 "$GITHUB_RAW_URL" -o "$tmp"; then
+    log_error "Falha ao baixar. Verifique a conexão com o GitHub."
+    rm -f "$tmp"; return
+  fi
+
+  local remote_ver; remote_ver=$(grep '^VERSION=' "$tmp" | head -1 | cut -d'"' -f2 || echo "")
+  [[ -z "$remote_ver" ]] && { log_error "Não foi possível determinar a versão do arquivo baixado"; rm -f "$tmp"; return; }
+
+  log_info "Versão atual:     ${amarelo}${VERSION}${reset}"
+  log_info "Versão disponível: ${verde}${remote_ver}${reset}"; echo ""
+
+  if [[ "$remote_ver" == "$VERSION" ]]; then
+    log_success "Você já está na versão mais recente ($VERSION)!"
+    rm -f "$tmp"; return
+  fi
+
+  if ! bash -n "$tmp" 2>/dev/null; then
+    log_error "Arquivo baixado com erro de sintaxe — abortando por segurança"
+    rm -f "$tmp"; return
+  fi
+
+  confirm "Atualizar de v${VERSION} para v${remote_ver}?" || { rm -f "$tmp"; return; }
+
+  local bak="${SCRIPT_FILE}.bak-$(date +%F_%T)"
+  cp "$SCRIPT_FILE" "$bak"
+  log_info "Versão atual salva em: $bak"
+
+  cp "$tmp" "$SCRIPT_FILE"
+  chmod +x "$SCRIPT_FILE"
+  rm -f "$tmp"
+
+  log_success "ZBX Swiss atualizado para v${remote_ver}!"
+  log_info "Reinicie o script para usar a nova versão."
+  exit 0
+}
+
 # ================================================================================
 # MAIN
 # ================================================================================
@@ -1245,23 +1573,25 @@ main() {
   detect_os
   load_config
 
-  # Wizard de primeira execução
   if [[ ! -f "$CONFIG_FILE" && -z "$DIRECT_ACTION" ]]; then
     first_run_wizard
   fi
 
-  # Ações diretas via CLI
   case "$DIRECT_ACTION" in
-    install)  install_zabbix_proxy; exit 0 ;;
-    remove)   remove_zabbix;        exit 0 ;;
-    status)   check_status;         exit 0 ;;
-    expand)   expand_disk;          exit 0 ;;
-    backup)   backup_now;           exit 0 ;;
-    restart)  restart_services;     exit 0 ;;
-    reconf)   reconfigure;          exit 0 ;;
+    install)     install_zabbix_proxy; exit 0 ;;
+    remove)      remove_zabbix;        exit 0 ;;
+    status)      check_status;         exit 0 ;;
+    health)      health_check;         exit 0 ;;
+    expand)      expand_disk;          exit 0 ;;
+    backup)      backup_now;           exit 0 ;;
+    restore)     restore_backup;       exit 0 ;;
+    tls)         setup_tls_psk;        exit 0 ;;
+    restart)     restart_services;     exit 0 ;;
+    diagnose)    export_diagnostics;   exit 0 ;;
+    reconf)      reconfigure;          exit 0 ;;
+    selfupdate)  self_update;          exit 0 ;;
   esac
 
-  # Menu interativo
   while true; do
     show_main_menu
     read -rp "$(echo -e "${branco}${bold}  ➤ Opção: ${reset}")" opt
@@ -1272,21 +1602,26 @@ main() {
       4)  restart_services      ;;
       5)  view_logs             ;;
       6)  install_agent2_menu   ;;
-      7)  expand_disk           ;;
-      8)  optimize_database     ;;
-      9)  backup_now            ;;
-      10) check_updates         ;;
-      11) setup_maintenance     ;;
-      12) system_cleanup        ;;
-      13) show_system_info      ;;
-      14) monitor_resources     ;;
-      15) reconfigure           ;;
+      7)  health_check          ;;
+      8)  expand_disk           ;;
+      9)  optimize_database     ;;
+      10) backup_now            ;;
+      11) restore_backup        ;;
+      12) setup_tls_psk         ;;
+      13) check_updates         ;;
+      14) setup_maintenance     ;;
+      15) system_cleanup        ;;
+      16) show_system_info      ;;
+      17) monitor_resources     ;;
+      18) export_diagnostics    ;;
+      19) reconfigure           ;;
+      20) self_update           ;;
       0)
         echo -e "${verde}${bold}  Até logo!${reset}"; echo ""
         exit 0 ;;
       *)
         print_header
-        log_error "Opção inválida: '$opt'. Use 0–15."
+        log_error "Opção inválida: '$opt'. Use 0–20."
         sleep 1
         continue ;;
     esac
