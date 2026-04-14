@@ -225,4 +225,4 @@ Se este script te economizou tempo, considere um cafezinho! ☕
 
 ## Licença
 
-MIT © [Seu Nome](https://github.com/SEU_USUARIO)
+MIT © [Romário Brito](https://github.com/romariormr)
